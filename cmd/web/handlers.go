@@ -3,18 +3,19 @@ package main
 import (
 	"fmt"
 	"html/template"
-	"log"
 	"net/http"
 	"strconv"
 )
 
 // Define a home handler function which writes a byte slice containing
 // "Hello from Snippetbox" as the response body.
-func home(w http.ResponseWriter, r *http.Request) {
+// Change the signature of the home handler so it is defined as a method against
+// *application.
+func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	// Check if the current request URL path exactly matches "/". If it doesn't, use
-	// the http.NotFound() function to send a 404 response to the client.
+	// the app.notFound() function to send a 404 response to the client.
 	if r.URL.Path != "/" {
-		http.NotFound(w, r)
+		app.notFound(w)
 		return
 	}
 
@@ -28,13 +29,12 @@ func home(w http.ResponseWriter, r *http.Request) {
 
 	// Use the template.ParseFiles() function to read the template file into a
 	// template set. If there's an error, we log the detailed error message and use
-	// the http.Error() function to send a generic 500 Internal Server Error
+	// app.serverError() function to send a generic 500 Internal Server Error
 	// response to the user.
 	ts, err := template.ParseFiles(files...)
 
 	if err != nil {
-		log.Println(err.Error())
-		http.Error(w, "Internal Server Error", 500)
+		app.serverError(w, err) // Use the serverError() helper
 		return
 	}
 
@@ -43,20 +43,19 @@ func home(w http.ResponseWriter, r *http.Request) {
 	// dynamic data that we want to pass in, which for now we'll leave as nil.
 	err = ts.Execute(w, nil)
 	if err != nil {
-		log.Println(err.Error())
-		http.Error(w, "Internal Server Error", 500)
+		app.serverError(w, err)
 	}
 }
 
 // Add a showSnippet handler function.
-func showSnippet(w http.ResponseWriter, r *http.Request) {
+func (app *application) showSnippet(w http.ResponseWriter, r *http.Request) {
 	// Extract the value of the id parameter from the query string and try to
 	// convert it to an integer using the strconv.Atoi() function. If it can't
 	// be converted to an integer, or the value is less than 1, we return a 404 page
 	// not found response.
 	id, err := strconv.Atoi(r.URL.Query().Get("id"))
 	if err != nil || id < 1 {
-		http.NotFound(w, r)
+		app.notFound(w)
 		return
 	}
 
@@ -66,7 +65,7 @@ func showSnippet(w http.ResponseWriter, r *http.Request) {
 }
 
 // Add a createSnippet handler function.
-func createSnippet(w http.ResponseWriter, r *http.Request) {
+func (app *application) createSnippet(w http.ResponseWriter, r *http.Request) {
 	// Use r.Method to check whether the request is using POST or not. Note that
 	// http.MethodPost is a constant equal to the string "POST".
 	if r.Method != http.MethodPost {
@@ -87,9 +86,9 @@ func createSnippet(w http.ResponseWriter, r *http.Request) {
 		// Retrieve the first value for the "Cache-Control" header.
 		w.Header().Get("Cache-Control")
 
-		/// Use the http.Error() function to send a 405 status code and "Method Not
+		/// Use the app.clientError() function to send a 405 status code and "Method Not
 		// Allowed" string as the response body.
-		http.Error(w, "Method Not Allowed", 405)
+		app.clientError(w, http.StatusMethodNotAllowed) // Use the clientError() helper.
 		return
 	}
 
