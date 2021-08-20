@@ -1,16 +1,19 @@
 package main
 
 import (
+	"database/sql"
 	"flag"
 	"log"
 	"net/http"
+	"obelov.com/snippetbox/pkg/models/postgres"
 	"os"
 	"path/filepath"
 )
 
-type Config struct {
-	Addr      string
-	StaticDir string
+type config struct {
+	addr      string
+	staticDir string
+	dbUrl     string
 }
 
 // Define an application struct to hold the application-wide dependencies for the
@@ -19,17 +22,20 @@ type Config struct {
 type application struct {
 	errorLog *log.Logger
 	infoLog  *log.Logger
-	config   *Config
+	config   *config
+	snippets *postgres.SnippetModel
 }
 
 func main() {
-	cfg := new(Config)
+	cfg := new(config)
 
 	// Define a new command-line flag with the name 'addr', a default value of ":4000"
 	// and some short help text explaining what the flag controls. The value of the
 	// flag will be stored in the cfg.Addr variable at runtime.
-	flag.StringVar(&cfg.Addr, "addr", ":4000", "HTTP network address")
-	flag.StringVar(&cfg.StaticDir, "static-dir", "./ui/static", "Path to static assets")
+	flag.StringVar(&cfg.addr, "addr", ":4000", "HTTP network address")
+	flag.StringVar(&cfg.staticDir, "static-dir", "./ui/static", "Path to static assets")
+	flag.StringVar(&cfg.dbUrl, "db-url",
+		"postgres://postgres:postgres@localhost:5433/snippetbox?sslmode=disable", "Data source Name")
 
 	// Importantly, we use the flag.Parse() function to parse the command-line flag.
 	// This reads in the command-line flag value and assigns it to the addr
@@ -50,27 +56,39 @@ func main() {
 	// file name and line number.
 	errorLog := log.New(os.Stderr, "ERROR\t", log.Ldate|log.Ltime|log.Lshortfile)
 
+	db, err := openDB(cfg.dbUrl)
+
+	if err != nil {
+		errorLog.Fatal(err)
+	}
+
+	defer db.Close()
+
 	// Initialize a new instance of application containing the dependencies.
 	app := &application{
 		errorLog: errorLog,
 		infoLog:  infoLog,
 		config:   cfg,
+		snippets: &postgres.SnippetModel{DB: db},
 	}
+
+	app.migrate()
 
 	// Initialize a new http.Server struct. We set the Addr and Handler fields so
 	// that the server uses the same network address and routes as before, and set
 	// the ErrorLog field so that the server now uses the custom errorLog logger in
 	// the event of any problems.
 	srv := &http.Server{
-		Addr:     app.config.Addr,
+		Addr:     app.config.addr,
 		ErrorLog: errorLog,
 		Handler:  app.routes(),
 	}
 
-	infoLog.Println("Starting server on : ", app.config.Addr)
-	err := srv.ListenAndServe()
+	infoLog.Println("Starting server on : ", app.config.addr)
 
-	errorLog.Fatal(err)
+	if err := srv.ListenAndServe(); err != nil {
+		errorLog.Fatal(err)
+	}
 }
 
 type neuteredFileSystem struct {
@@ -97,4 +115,29 @@ func (nfs neuteredFileSystem) Open(path string) (http.File, error) {
 	}
 
 	return f, nil
+}
+
+func openDB(dsn string) (*sql.DB, error) {
+	db, err := sql.Open("postgres", dsn)
+
+	if err != nil {
+		return nil, err
+	}
+	if err = db.Ping(); err != nil {
+		return nil, err
+	}
+
+	// Set the maximum number of concurrently open (idle + in-use) connections. Setting this
+	// to less than or equal to 0 will mean there is no maximum limit. If the maximum
+	// number of open connections is reached and all are in-use when a new connection is
+	// needed, Go will wait until one of the connections is freed and becomes idle. From a
+	// user perspective, this means their HTTP request will hang until a connection
+	// is freed.
+	db.SetMaxOpenConns(100)
+
+	// Set the maximum number of idle connections in the pool. Setting this
+	// to less than or equal to 0 will mean that no idle connections are retained.
+	db.SetMaxIdleConns(5)
+
+	return db, nil
 }
