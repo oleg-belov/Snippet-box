@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"flag"
+	"html/template"
 	"log"
 	"net/http"
 	"obelov.com/snippetbox/pkg/models/postgres"
@@ -20,10 +21,11 @@ type config struct {
 // web application. For now we'll only include fields for the two custom loggers, but
 // we'll add more to it as the build progresses.
 type application struct {
-	errorLog *log.Logger
-	infoLog  *log.Logger
-	config   *config
-	snippets *postgres.SnippetModel
+	errorLog      *log.Logger
+	infoLog       *log.Logger
+	config        *config
+	snippets      *postgres.SnippetModel
+	templateCache map[string]*template.Template
 }
 
 func main() {
@@ -64,12 +66,19 @@ func main() {
 
 	defer db.Close()
 
+	// Initialize a new template cache...
+	templateCache, err := newTemplateCache("./ui/html/")
+	if err != nil {
+		errorLog.Fatal(err)
+	}
+
 	// Initialize a new instance of application containing the dependencies.
 	app := &application{
-		errorLog: errorLog,
-		infoLog:  infoLog,
-		config:   cfg,
-		snippets: &postgres.SnippetModel{DB: db},
+		errorLog:      errorLog,
+		infoLog:       infoLog,
+		config:        cfg,
+		snippets:      &postgres.SnippetModel{DB: db},
+		templateCache: templateCache,
 	}
 
 	app.migrate()
