@@ -3,12 +3,14 @@ package main
 import (
 	"database/sql"
 	"flag"
+	"github.com/golangcollege/sessions"
 	"html/template"
 	"log"
 	"net/http"
 	"obelov.com/snippetbox/pkg/models/postgres"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type config struct {
@@ -24,6 +26,7 @@ type application struct {
 	errorLog      *log.Logger
 	infoLog       *log.Logger
 	config        *config
+	session       *sessions.Session
 	snippets      *postgres.SnippetModel
 	templateCache map[string]*template.Template
 }
@@ -38,6 +41,11 @@ func main() {
 	flag.StringVar(&cfg.staticDir, "static-dir", "./ui/static", "Path to static assets")
 	flag.StringVar(&cfg.dbUrl, "db-url",
 		"postgres://postgres:postgres@localhost:5433/snippetbox?sslmode=disable", "Data source Name")
+
+	// Define a new command-line flag for the session secret (a random key which
+	// will be used to encrypt and authenticate session cookies). It should be 32
+	// bytes long.
+	secret := flag.String("secret", "s6Ndh+pPbnzHbS*+9Pk8qGWhTzbpa@ge", "Secret key")
 
 	// Importantly, we use the flag.Parse() function to parse the command-line flag.
 	// This reads in the command-line flag value and assigns it to the addr
@@ -72,11 +80,18 @@ func main() {
 		errorLog.Fatal(err)
 	}
 
+	// Use the sessions.New() function to initialize a new session manager,
+	// passing in the secret key as the parameter. Then we configure it so
+	// sessions always expires after 12 hours.
+	session := sessions.New([]byte(*secret))
+	session.Lifetime = 12 * time.Hour
+
 	// Initialize a new instance of application containing the dependencies.
 	app := &application{
 		errorLog:      errorLog,
 		infoLog:       infoLog,
 		config:        cfg,
+		session:       session,
 		snippets:      &postgres.SnippetModel{DB: db},
 		templateCache: templateCache,
 	}

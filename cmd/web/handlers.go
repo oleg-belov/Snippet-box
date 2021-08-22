@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"obelov.com/snippetbox/pkg/forms"
 	"obelov.com/snippetbox/pkg/models"
 	"strconv"
 )
@@ -13,13 +14,8 @@ import (
 // Change the signature of the home handler so it is defined as a method against
 // *application.
 func (app *application) home(w http.ResponseWriter, r *http.Request) {
-	// Check if the current request URL path exactly matches "/". If it doesn't, use
-	// the app.notFound() function to send a 404 response to the client.
-	if r.URL.Path != "/" {
-		app.notFound(w)
-		return
-	}
-
+	// Because Pat matches the "/" path exactly, we can now remove the manual check
+	// of r.URL.Path != "/" from this handler.
 	s, err := app.snippets.Latest()
 	if err != nil {
 		app.serverError(w, err)
@@ -40,7 +36,10 @@ func (app *application) showSnippet(w http.ResponseWriter, r *http.Request) {
 	// convert it to an integer using the strconv.Atoi() function. If it can't
 	// be converted to an integer, or the value is less than 1, we return a 404 page
 	// not found response.
-	id, err := strconv.Atoi(r.URL.Query().Get("id"))
+	// Pat doesn't strip the colon from the named capture key, so we need to
+	// get the value of ":id" from the query string instead of "id".
+	id, err := strconv.Atoi(r.URL.Query().Get(":id"))
+
 	if err != nil || id < 1 {
 		app.notFound(w)
 		return
@@ -66,48 +65,59 @@ func (app *application) showSnippet(w http.ResponseWriter, r *http.Request) {
 	app.render(w, r, "show.page.tmpl", data)
 }
 
+// Add a new createSnippetForm handler, which for now returns a placeholder response.
+func (app *application) createSnippetForm(w http.ResponseWriter, r *http.Request) {
+	app.render(w, r, "create.page.tmpl", &templateData{
+		// Pass a new empty forms.Form object to the template.
+		Form: forms.New(nil),
+	})
+}
+
 // Add a createSnippet handler function.
 func (app *application) createSnippet(w http.ResponseWriter, r *http.Request) {
-	// Use r.Method to check whether the request is using POST or not. Note that
-	// http.MethodPost is a constant equal to the string "POST".
-	if r.Method != http.MethodPost {
-		// Use the Header().Set() method to add an 'Allow: POST' header to the
-		// response header map. The first parameter is the header name, and
-		// the second parameter is the header value.
-		w.Header().Set("Allow", http.MethodPost)
+	// Checking if the request method is a POST is now superfluous and can be
+	// removed.
 
-		// Set a new cache-control header. If an existing "Cache-Control" header exists
-		// it will be overwritten.
-		w.Header().Set("Cache-Control", "public, max-age=31536000")
-		// In contrast, the Add() method appends a new "Cache-Control" header and can
-		// be called multiple times.
-		w.Header().Add("Cache-Control", "public")
-		w.Header().Add("Cache-Control", "max-age=31536000")
-		// Delete all values for the "Cache-Control" header.
-		w.Header().Del("Cache-Control")
-		// Retrieve the first value for the "Cache-Control" header.
-		w.Header().Get("Cache-Control")
-
-		/// Use the app.clientError() function to send a 405 status code and "Method Not
-		// Allowed" string as the response body.
-		app.clientError(w, http.StatusMethodNotAllowed) // Use the clientError() helper.
+	// First we call r.ParseForm() which adds any data in POST request bodies
+	// to the r.PostForm map. This also works in the same way for PUT and PATCH
+	// requests. If there are any errors, we use our app.ClientError helper to send
+	// a 400 Bad Request response to the user.
+	err := r.ParseForm()
+	if err != nil {
+		app.clientError(w, http.StatusBadRequest)
 		return
 	}
 
-	// Create some variables holding dummy data. We'll remove these later on
-	// during the build.
-	title := "O"
-	content := "O"
-	expires := "7"
+	// Create a new forms.Form struct containing the POSTed data from the
+	// form, then use the validation methods to check the content.
+	form := forms.New(r.PostForm)
+	form.Required("title", "content", "expires")
+	form.MaxLength("title", 100)
+	form.PermittedValues("expires", "365", "7", "1")
 
-	// Pass the data to the SnippetModel.Insert() method, receiving the
-	// ID of the new record back.
-	id, err := app.snippets.Insert(title, content, expires)
+	// If the form isn't valid, redisplay the template passing in the
+	// form.Form object as the data.
+	if !form.Valid() {
+		app.render(w, r, "create.page.tmpl", &templateData{Form: form})
+		return
+	}
+
+	// Because the form data (with type url.Values) has been anonymously embedded
+	// in the form.Form struct, we can use the Get() method to retrieve
+	// the validated value for a particular form field.
+	id, err := app.snippets.Insert(form.Get("title"), form.Get("content"), form.Get("expires"))
 	if err != nil {
 		app.serverError(w, err)
 		return
 	}
 
-	// Redirect the user to the relevant page for the snippet.
-	http.Redirect(w, r, fmt.Sprintf("/snippet?id=%d", id), http.StatusSeeOther)
+	// Use the Put() method to add a string value ("Your snippet was saved
+	// successfully!") and the corresponding key ("flash") to the session
+	// data. Note that if there's no existing session for the current user
+	// (or their session has expired) then a new, empty, session for them
+	// will automatically be created by the session middleware.
+	app.session.Put(r, "flash", "Snippet successfully created!")
+
+	// Change the redirect to use the new semantic URL style of /snippet/:id
+	http.Redirect(w, r, fmt.Sprintf("/snippet/%d", id), http.StatusSeeOther)
 }
