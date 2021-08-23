@@ -21,3 +21,4 @@
 /snippetbox/*
 docker-compose.yaml
 Dockerfile
+/tls/*
