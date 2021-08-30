@@ -1,0 +1,31 @@
+version: '3.6'
+
+services:
+
+  postgresdb:
+    build:
+      context: ./Docker
+      dockerfile: db.Dockerfile
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres:/var/lib/postgresql/data
+
+  # App Service
+  app:
+    # Configuration for building the docker image for the service
+    build:
+      context: ../
+      dockerfile: build/Docker/app.Dockerfile
+    ports:
+      - "4000:4000" # Forward the exposed port 4000 on the container to port 4000 on the host machine
+    restart: unless-stopped
+    depends_on:
+      - postgresdb # This service depends on postgresdb. Start that first.
+
+volumes:
+  postgres:
+    driver: local

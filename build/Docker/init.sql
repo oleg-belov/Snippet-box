@@ -1,0 +1,21 @@
+CREATE ROLE my_user
+    NOSUPERUSER
+    CREATEDB
+    CREATEROLE
+    NOINHERIT
+    LOGIN
+    PASSWORD 'myUser!2021';
+
+CREATE DATABASE snippetbox;
+GRANT ALL PRIVILEGES ON DATABASE snippetbox TO my_user;
+
+CREATE USER my_test_user WITH
+    NOSUPERUSER
+    CREATEDB
+    CREATEROLE
+    NOINHERIT
+    LOGIN
+	PASSWORD 'myTestUser!2021';
+
+CREATE DATABASE snippetbox_test;
+GRANT ALL PRIVILEGES ON DATABASE snippetbox_test TO my_test_user;

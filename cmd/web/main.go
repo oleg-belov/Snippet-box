@@ -3,32 +3,51 @@ package main
 import (
 	"crypto/tls"
 	"database/sql"
+	"expvar"
 	"flag"
 	"github.com/golangcollege/sessions"
 	"html/template"
 	"log"
 	"net/http"
+	"obelov.com/snippetbox/pkg/models"
 	"obelov.com/snippetbox/pkg/models/postgres"
 	"os"
 	"path/filepath"
 	"time"
 )
 
+var version string
+
+type contextKey string
+
+const contextKeyIsAuthenticated = contextKey("isAuthenticated")
+
 type config struct {
 	addr      string
 	staticDir string
 	dbUrl     string
+	env       string
 }
 
 // Define an application struct to hold the application-wide dependencies for the
 // web application. For now we'll only include fields for the two custom loggers, but
 // we'll add more to it as the build progresses.
 type application struct {
-	errorLog      *log.Logger
-	infoLog       *log.Logger
-	config        *config
-	session       *sessions.Session
-	snippets      *postgres.SnippetModel
+	errorLog *log.Logger
+	infoLog  *log.Logger
+	config   *config
+	session  *sessions.Session
+	snippets interface {
+		Insert(string, string, string) (int, error)
+		Get(int) (*models.Snippet, error)
+		Latest() ([]*models.Snippet, error)
+	}
+	users interface {
+		Insert(string, string, string) error
+		Authenticate(string, string) (int, error)
+		Get(int) (*models.User, error)
+		ChangePassword(int, string, string) error
+	}
 	templateCache map[string]*template.Template
 }
 
@@ -41,7 +60,8 @@ func main() {
 	flag.StringVar(&cfg.addr, "addr", ":4000", "HTTP network address")
 	flag.StringVar(&cfg.staticDir, "static-dir", "./ui/static", "Path to static assets")
 	flag.StringVar(&cfg.dbUrl, "db-url",
-		"postgres://postgres:postgres@localhost:5433/snippetbox?sslmode=disable", "Data source Name")
+		"postgres://my_user:myUser!2021@localhost:5432/snippetbox?sslmode=disable", "Data source Name")
+	flag.StringVar(&cfg.env, "env", "development", "Environment (development|staging|production)")
 
 	// Define a new command-line flag for the session secret (a random key which
 	// will be used to encrypt and authenticate session cookies). It should be 32
@@ -54,6 +74,8 @@ func main() {
 	// otherwise it will always contain the default value of ":4000". If any errors are
 	// encountered during parsing the application will be terminated.
 	flag.Parse()
+
+	expvar.NewString("version").Set(version)
 
 	// Use log.New() to create a logger for writing information messages. This takes
 	// three parameters: the destination to write the logs to (os.Stdout), a string
@@ -68,11 +90,9 @@ func main() {
 	errorLog := log.New(os.Stderr, "ERROR\t", log.Ldate|log.Ltime|log.Lshortfile)
 
 	db, err := openDB(cfg.dbUrl)
-
 	if err != nil {
 		errorLog.Fatal(err)
 	}
-
 	defer db.Close()
 
 	// Initialize a new template cache...
@@ -86,6 +106,8 @@ func main() {
 	// sessions always expires after 12 hours.
 	session := sessions.New([]byte(*secret))
 	session.Lifetime = 12 * time.Hour
+	session.Secure = true
+	session.SameSite = http.SameSiteStrictMode
 
 	// Initialize a new instance of application containing the dependencies.
 	app := &application{
@@ -94,6 +116,7 @@ func main() {
 		config:        cfg,
 		session:       session,
 		snippets:      &postgres.SnippetModel{DB: db},
+		users:         &postgres.UserModel{DB: db},
 		templateCache: templateCache,
 	}
 

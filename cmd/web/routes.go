@@ -16,15 +16,31 @@ func (app *application) routes() http.Handler {
 	// Create a new middleware chain containing the middleware specific to
 	// our dynamic application routes. For now, this chain will only contain
 	// the session middleware but we'll add more to it later.
-	dynamicMiddleware := alice.New(app.session.Enable)
+	// Use the nosurf middleware on all our 'dynamic' routes.
+	dynamicMiddleware := alice.New(app.session.Enable, noSurf, app.authenticate)
 
 	mux := pat.New()
 	// Update these routes to use the new dynamic middleware chain followed
 	// by the appropriate handler function.
 	mux.Get("/", dynamicMiddleware.ThenFunc(app.home))
-	mux.Get("/snippet/create", dynamicMiddleware.ThenFunc(app.createSnippetForm))
-	mux.Post("/snippet/create", dynamicMiddleware.ThenFunc(app.createSnippet))
+	mux.Get("/about", dynamicMiddleware.ThenFunc(app.about))
+	mux.Get("/snippet/create", dynamicMiddleware.Append(app.requireAuthentication).ThenFunc(app.createSnippetForm))
+	mux.Post("/snippet/create", dynamicMiddleware.Append(app.requireAuthentication).ThenFunc(app.createSnippet))
 	mux.Get("/snippet/:id", dynamicMiddleware.ThenFunc(app.showSnippet))
+
+	// Add the five new routes.
+	mux.Get("/user/signup", dynamicMiddleware.ThenFunc(app.signupUserForm))
+	mux.Post("/user/signup", dynamicMiddleware.ThenFunc(app.signupUser))
+	mux.Get("/user/login", dynamicMiddleware.ThenFunc(app.loginUserForm))
+	mux.Post("/user/login", dynamicMiddleware.ThenFunc(app.loginUser))
+	mux.Post("/user/logout", dynamicMiddleware.Append(app.requireAuthentication).ThenFunc(app.logoutUser))
+	mux.Get("/user/profile", dynamicMiddleware.Append(app.requireAuthentication).ThenFunc(app.userProfile))
+	mux.Get("/user/change-password", dynamicMiddleware.Append(app.requireAuthentication).ThenFunc(app.changePasswordForm))
+	mux.Post("/user/change-password", dynamicMiddleware.Append(app.requireAuthentication).ThenFunc(app.changePassword))
+
+	// Add a new GET /ping route.
+	mux.Get("/ping", http.HandlerFunc(ping))
+	mux.Get("/healthcheck", http.HandlerFunc(app.healthcheckHandler))
 
 	// Create a file server which serves files out of the "./ui/static" directory.
 	// Note that the path given to the http.Dir function is relative to the project
